@@ -53,6 +53,12 @@
         "command": "/list-channel-pingers",
         "description": "Lists the people who can ping @channel/here in this channel.",
         "should_escape": true
+      },
+      {
+        "command": "/at-channel-leaderboard",
+        "description": "Shows the top 15 channel pingers or a specific user's ranking.",
+        "usage_hint": "[@user]",
+        "should_escape": true
       }
     ]
   },

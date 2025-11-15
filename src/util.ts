@@ -148,6 +148,18 @@ export function generateListChannelPingersErrorMessage(
   `.trim();
 }
 
+export function generateLeaderboardErrorMessage(
+  rayId: string,
+  error: unknown,
+) {
+  return stripIndents`
+  :tw_warning: Unfortunately, I wasn't able to fetch the leaderboard. Please DM <@U059VC0UDEU> with your Ray ID (\`${rayId}\`) and the error message below:
+  \`\`\`
+  ${error?.toString?.()}
+  \`\`\`
+  `.trim();
+}
+
 export const CHANNEL_COMMAND_NAME =
   env.NODE_ENV === "development" ? "/dev-channel" : "/channel";
 export const HERE_COMMAND_NAME =
@@ -164,3 +176,7 @@ export const LIST_CHANNEL_PERMS_HAVERS_NAME =
   env.NODE_ENV === "development"
     ? "/dev-list-channel-pingers"
     : "/list-channel-pingers";
+export const AT_CHANNEL_LEADERBOARD_NAME =
+  env.NODE_ENV === "development"
+    ? "/dev-at-channel-leaderboard"
+    : "/at-channel-leaderboard";
