@@ -15,11 +15,13 @@ import {
   getChannelManagers,
   getChannelCreator,
   generateListChannelPingersErrorMessage,
+  AT_CHANNEL_LEADERBOARD_NAME,
+  generateLeaderboardErrorMessage,
 } from "./util";
 import { richTextBlockToMrkdwn } from "./richText";
 import buildEditPingModal from "./editPingModal";
 import { db, adminsTable, pingsTable, pingPermsTable } from "./db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { LogSnag } from "@logsnag/node";
 import type Slack from "@slack/bolt";
 import { stripIndents } from "common-tags";
@@ -380,7 +382,6 @@ async function listChannelPingersCommand({
       userIds.add(channelCreator);
     }
 
-    // Filter out any non-string values from userIds
     const filteredUserIds = new Set(
       Array.from(userIds).filter((id): id is string => typeof id === "string"),
     );
@@ -405,6 +406,93 @@ async function listChannelPingersCommand({
     console.log(e);
     logger.error(`${rayId}: Failed to list channel pingers: ${e}`);
     const errorMessage = generateListChannelPingersErrorMessage(rayId, e);
+    try {
+      await respond({
+        text: errorMessage,
+        response_type: "ephemeral",
+      });
+    } catch {
+      await client.chat.postMessage({
+        channel: userId,
+        text: errorMessage,
+      });
+    }
+  }
+}
+
+async function leaderboardCommand({
+  command,
+  ack,
+  respond,
+  payload,
+  client,
+}: SlackCommandMiddlewareArgs & { client: Slack.webApi.WebClient }) {
+  await ack();
+  const rayId = generateRandomString(12);
+  const { user_id: userId } = command;
+  const { text: target } = payload;
+  const match = target.match(/^<@([UW][A-Z0-9]+)(\|[^>]+)?>$/);
+  const targetId = match ? match[1] : null;
+
+  try {
+    const leaderboard = await db
+      .select({
+        slackId: pingsTable.slackId,
+        channelCount: sql<number>`SUM(CASE WHEN ${pingsTable.type} = 'channel' THEN 1 ELSE 0 END)`,
+        hereCount: sql<number>`SUM(CASE WHEN ${pingsTable.type} = 'here' THEN 1 ELSE 0 END)`,
+        totalCount: sql<number>`COUNT(*)`,
+      })
+      .from(pingsTable)
+      .groupBy(pingsTable.slackId)
+      .orderBy(sql`COUNT(*) DESC`);
+
+    if (leaderboard.length === 0) {
+      await respond({
+        text: ":tw_warning: No pings have been sent yet!",
+        response_type: "ephemeral",
+      });
+      return;
+    }
+
+    if (targetId) {
+      const userRank = leaderboard.findIndex((row) => row.slackId === targetId);
+      if (userRank === -1) {
+        await respond({
+          text: `:tw_warning: <@${targetId}> has not sent any pings yet!`,
+          response_type: "ephemeral",
+        });
+        return;
+      }
+
+      const userStats = leaderboard[userRank];
+      await respond({
+        text: stripIndents`
+          :tw_trophy: <@${targetId}> is ranked #${userRank + 1} on the leaderboard!
+          @channel pings: ${userStats.channelCount}
+          @here pings: ${userStats.hereCount}
+          Total pings: ${userStats.totalCount}
+        `.trim(),
+        response_type: "ephemeral",
+      });
+      return;
+    }
+
+    const top15 = leaderboard.slice(0, 15);
+    const leaderboardText = top15
+      .map(
+        (row, index) =>
+          `${index + 1}. <@${row.slackId}> - ${row.totalCount} pings (${row.channelCount} @channel, ${row.hereCount} @here)`,
+      )
+      .join("\n");
+
+    await respond({
+      text: `:tw_trophy: *Top ${top15.length} Channel Pingers*\n${leaderboardText}`,
+      response_type: "ephemeral",
+    });
+  } catch (e) {
+    console.log(e);
+    logger.error(`${rayId}: Failed to fetch leaderboard: ${e}`);
+    const errorMessage = generateLeaderboardErrorMessage(rayId, e);
     try {
       await respond({
         text: errorMessage,
@@ -627,6 +715,7 @@ app.command(HERE_COMMAND_NAME, pingCommand.bind(null, "here"));
 app.command(ADD_CHANNEL_PERMS_NAME, addChannelPermsCommand.bind(null));
 app.command(REMOVE_CHANNEL_PERMS_NAME, removeChannelPermsCommand.bind(null));
 app.command(LIST_CHANNEL_PERMS_HAVERS_NAME, listChannelPingersCommand);
+app.command(AT_CHANNEL_LEADERBOARD_NAME, leaderboardCommand);
 
 await app.start();
 
