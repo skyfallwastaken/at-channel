@@ -431,7 +431,8 @@ async function leaderboardCommand({
   const rayId = generateRandomString(12);
   const { user_id: userId } = command;
   const { text: target } = payload;
-  const match = target.match(/^<@([UW][A-Z0-9]+)(\|[^>]+)?>$/);
+  const trimmedTarget = target.trim();
+  const match = trimmedTarget.match(/^<@([UW][A-Z0-9]+)(\|[^>]+)?>$/);
   const targetId = match ? match[1] : null;
 
   try {
@@ -467,7 +468,7 @@ async function leaderboardCommand({
       const userStats = leaderboard[userRank];
       await respond({
         text: stripIndents`
-          :tw_trophy: <@${targetId}> is ranked #${userRank + 1} on the leaderboard!
+          :tw_trophy: <@${targetId}> is ranked #${userRank + 1}/${leaderboard.length} on the leaderboard!
           @channel pings: ${userStats.channelCount}
           @here pings: ${userStats.hereCount}
           Total pings: ${userStats.totalCount}
