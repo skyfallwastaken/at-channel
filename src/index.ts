@@ -17,11 +17,19 @@ import {
   generateListChannelPingersErrorMessage,
   AT_CHANNEL_LEADERBOARD_NAME,
   generateLeaderboardErrorMessage,
+  SCHEDULE_PING_COMMAND_NAME,
+  generateSchedulePingErrorMessage,
 } from "./util";
 import { richTextBlockToMrkdwn } from "./richText";
 import buildEditPingModal from "./editPingModal";
-import { db, adminsTable, pingsTable, pingPermsTable } from "./db";
-import { and, eq, sql } from "drizzle-orm";
+import {
+  db,
+  adminsTable,
+  pingsTable,
+  pingPermsTable,
+  scheduledPingsTable,
+} from "./db";
+import { and, eq, sql, lte } from "drizzle-orm";
 import { LogSnag } from "@logsnag/node";
 import type Slack from "@slack/bolt";
 import { stripIndents } from "common-tags";
@@ -107,7 +115,7 @@ async function sendPing(
           user: userId,
         },
       })
-      .catch(() => {}),
+      .catch(() => { }),
   ]);
 }
 
@@ -226,7 +234,7 @@ async function addChannelPermsCommand({
               target_id: targetId,
             },
           })
-          .catch(() => {});
+          .catch(() => { });
         return;
       }
     } else {
@@ -312,7 +320,7 @@ async function removeChannelPermsCommand({
               target_id: targetId,
             },
           })
-          .catch(() => {});
+          .catch(() => { });
         return;
       } else {
         await respond({
@@ -508,6 +516,138 @@ async function leaderboardCommand({
   }
 }
 
+async function schedulePingCommand({
+  command,
+  ack,
+  respond,
+  payload,
+  client,
+}: SlackCommandMiddlewareArgs & { client: Slack.webApi.WebClient }) {
+  await ack();
+  const rayId = generateRandomString(12);
+  const { channel_id: channelId, user_id: userId } = command;
+  const { text } = payload;
+
+  try {
+    if (!(await hasPerms(userId, channelId, client))) {
+      await respond({
+        text: stripIndents`
+          :tw_warning: *You need to be a channel manager to use this command.*
+          If this is a private channel, you'll need to add <@${botId}> to the channel.
+          _If this is incorrect, please DM <@U059VC0UDEU>._
+        `.trim(),
+        response_type: "ephemeral",
+      });
+      logger.debug(
+        `${rayId}: Failed to schedule ping: user ${userId} not admin or channel manager`,
+      );
+      return;
+    }
+
+    // channel|here time message
+    const parts = text.trim().split(/\s+/);
+    if (parts.length < 3) {
+      await respond({
+        text: stripIndents`
+          :tw_warning: *Invalid format!*
+          Usage: \`/schedule-ping <channel|here> <time> <message>\`
+          
+          Time can be:
+          - Seconds: \`30s\`, \`45s\` (for testing)
+          - Minutes: \`5m\`, \`30m\`
+          - Hours: \`1h\`, \`2h\`
+          - Days: \`1d\`, \`7d\`
+          
+          Example: \`/schedule-ping channel 1h huddle in 5 minutes!\`
+        `.trim(),
+        response_type: "ephemeral",
+      });
+      return;
+    }
+
+    const [pingType, timeStr, ...messageParts] = parts;
+    const message = messageParts.join(" ");
+
+    if (pingType !== "channel" && pingType !== "here") {
+      await respond({
+        text: ":tw_warning: *Invalid ping type!* Must be either `channel` or `here`.",
+        response_type: "ephemeral",
+      });
+      return;
+    }
+
+    // format [num]s/m/h/d, e.g. 30s or 5m
+    const timeMatch = timeStr.match(/^(\d+)([smhd])$/);
+    if (!timeMatch) {
+      await respond({
+        text: ":tw_warning: *Invalid time format!* Use format like `30s` (seconds), `5m` (minutes), `2h` (hours), or `1d` (days).",
+        response_type: "ephemeral",
+      });
+      return;
+    }
+
+    const value = parseInt(timeMatch[1], 10);
+    const unit = timeMatch[2];
+    let milliseconds = 0;
+
+    switch (unit) {
+      case "s":
+        milliseconds = value * 1000;
+        break;
+      case "m":
+        milliseconds = value * 60 * 1000;
+        break;
+      case "h":
+        milliseconds = value * 60 * 60 * 1000;
+        break;
+      case "d":
+        milliseconds = value * 24 * 60 * 60 * 1000;
+        break;
+    }
+
+    const scheduledTime = new Date(Date.now() + milliseconds);
+    const scheduleId = generateRandomString(16);
+
+    await db.insert(scheduledPingsTable).values({
+      id: scheduleId,
+      slackId: userId,
+      channelId,
+      message,
+      type: pingType,
+      scheduledTime,
+      createdAt: new Date(),
+    });
+
+    await respond({
+      text: stripIndents`
+        :tw_white_check_mark: @${pingType} ping scheduled for *<!date^${Math.floor(scheduledTime.getTime() / 1000)}^{date_short_pretty} at {time}|${scheduledTime.toISOString()}>*
+        
+        Message: ${message}
+      `.trim(),
+      response_type: "ephemeral",
+    });
+
+    logger.info(
+      `${rayId}: Scheduled ${pingType} ping for ${scheduledTime.toISOString()} in channel ${channelId}`,
+    );
+  } catch (e) {
+    console.log(e);
+    logger.error(`${rayId}: Failed to schedule ping: ${e}`);
+    const errorMessage = generateSchedulePingErrorMessage(rayId, e);
+    try {
+      await respond({
+        text: errorMessage,
+        response_type: "ephemeral",
+      });
+    } catch {
+      await client.chat.postMessage({
+        channel: userId,
+        text: errorMessage,
+      });
+    }
+  }
+}
+
 app.shortcut(
   { callback_id: "delete_ping", type: "message_action" },
   async ({ shortcut, ack, respond, client }) => {
@@ -566,7 +706,7 @@ app.shortcut(
               user: userId,
             },
           })
-          .catch(() => {}),
+          .catch(() => { }),
       ]);
     } catch (e) {
       logger.error(`${rayId}: Failed to delete ping: ${e}`);
@@ -684,7 +824,7 @@ app.view(
               user: body.user.id,
             },
           })
-          .catch(() => {}),
+          .catch(() => { }),
       ]);
     } catch (e) {
       logger.error(`${rayId}: Failed to edit ping: ${e}`);
@@ -717,7 +857,61 @@ app.command(ADD_CHANNEL_PERMS_NAME, addChannelPermsCommand.bind(null));
 app.command(REMOVE_CHANNEL_PERMS_NAME, removeChannelPermsCommand.bind(null));
 app.command(LIST_CHANNEL_PERMS_HAVERS_NAME, listChannelPingersCommand);
 app.command(AT_CHANNEL_LEADERBOARD_NAME, leaderboardCommand);
+app.command(SCHEDULE_PING_COMMAND_NAME, schedulePingCommand);
 
 await app.start();
 
 logger.info("Started @channel!");
+
+async function processScheduledPings() {
+  try {
+    const now = new Date();
+    const duePings = await db
+      .select()
+      .from(scheduledPingsTable)
+      .where(lte(scheduledPingsTable.scheduledTime, now));
+
+    for (const ping of duePings) {
+      try {
+        logger.info(
+          `Processing scheduled ping ${ping.id} for channel ${ping.channelId}`,
+        );
+
+        await sendPing(
+          ping.type,
+          ping.message,
+          ping.slackId,
+          ping.channelId,
+          app.client,
+        );
+
+        logger.info(`Successfully sent scheduled ping ${ping.id}`);
+      } catch (error) {
+        logger.error(`Failed to send scheduled ping ${ping.id}: ${error}`);
+
+        // sends to person requesting when fails
+        try {
+          await app.client.chat.postMessage({
+            channel: ping.slackId,
+            text: stripIndents`
+              :tw_warning: *Failed to send your scheduled ping* - if this was unexpected, forward this message to <@U08PUHSMW4V>.
+              Schedule ID: \`${ping.id}\`
+              Channel: <#${ping.channelId}>
+              Message: ${ping.message}
+              Error: ${error?.toString?.() || "Unknown error"}
+            `.trim(),
+          });
+        } catch { }
+      }
+      await db
+        .delete(scheduledPingsTable)
+        .where(eq(scheduledPingsTable.id, ping.id));
+    }
+  } catch (error) {
+    logger.error(`Error processing scheduled pings: ${error}`);
+  }
+}
+
+setInterval(processScheduledPings, env.SCHEDULED_PING_PROCESS_INTERVAL); // defaults to 30s
+
+processScheduledPings(); // runs once on startup
