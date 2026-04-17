@@ -127,6 +127,14 @@ async function pingCommand(
   const { text: message } = payload;
 
   try {
+    if (channelId === "C09BQEC01FZ") {
+      await respond({
+        text: `<@${userId}> tried to ping. i'm tired boss. no pings for you.`,
+        response_type: "in_channel",
+      });
+      return;
+    }
+
     if (!(await hasPerms(userId, channelId, client))) {
       await respond({
         text: stripIndents`
