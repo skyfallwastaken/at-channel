@@ -105,6 +105,13 @@ export function generatePingErrorMessage(
     `.trim();
   }
 
+  if (error?.toString?.().includes("restricted_action")) {
+    return stripIndents`
+      :tw_warning: You didn't give me permission to talk :(
+      On Slack web/desktop, open Channel Settings → Posting permissions, then allow <@${botId}> to send messages to the channel.`.
+    `.trim();
+  }
+
   return stripIndents`
     :tw_warning: *Hey <@${userId}>!* Unfortunately, I wasn't able to send your @${type} ping with message \`${escapedMessage}\`.
     Please DM <@U059VC0UDEU> so this can be fixed! Make sure to include the Ray ID (\`${rayId}\`) in your message. Thank you! :yay:
