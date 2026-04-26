@@ -160,6 +160,18 @@ export function generateLeaderboardErrorMessage(
   `.trim();
 }
 
+export function generateSchedulePingErrorMessage(
+  rayId: string,
+  error: unknown,
+) {
+  return stripIndents`
+  :tw_warning: Unfortunately, I wasn't able to schedule your ping. Please DM <@U059VC0UDEU> with your Ray ID (\`${rayId}\`) and the error message below:
+  \`\`\`
+  ${error?.toString?.()}
+  \`\`\`
+  `.trim();
+}
+
 export const CHANNEL_COMMAND_NAME =
   env.NODE_ENV === "development" ? "/dev-channel" : "/channel";
 export const HERE_COMMAND_NAME =
@@ -180,3 +192,5 @@ export const AT_CHANNEL_LEADERBOARD_NAME =
   env.NODE_ENV === "development"
     ? "/dev-at-channel-leaderboard"
     : "/at-channel-leaderboard";
+export const SCHEDULE_PING_COMMAND_NAME =
+  env.NODE_ENV === "development" ? "/dev-schedule-ping" : "/schedule-ping";

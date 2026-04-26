@@ -17,5 +17,7 @@ export const Env = z.object({
     .enum(["debug", "info", "warn", "error", "fatal"])
     .default("info"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("production"),
+
+  SCHEDULED_PING_PROCESS_INTERVAL: z.coerce.number().default(30000), // MILLISECONDS
 });
 export const env = Env.parse(process.env);
