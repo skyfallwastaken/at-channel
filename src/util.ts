@@ -108,7 +108,7 @@ export function generatePingErrorMessage(
   if (error?.toString?.().includes("restricted_action")) {
     return stripIndents`
       :tw_warning: You didn't give me permission to talk :(
-      On Slack web/desktop, open Channel Settings → Posting permissions, then allow <@${botId}> to send messages to the channel.`.
+      On Slack web/desktop, open Channel Settings → Posting permissions, then allow <@${botId}> to send messages to the channel.
     `.trim();
   }
 
