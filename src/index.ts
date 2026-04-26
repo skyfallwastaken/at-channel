@@ -232,7 +232,7 @@ async function addChannelPermsCommand({
     } else {
       await respond({
         text: `:tw_warning: *You need to be a channel manager to use this command.*
-          If this is a private channel, you'll need to add <@${botId}> to the channel.
+          If this is a private channel, you'll need to add <@${botId}> to the channel. If you didn't make the private channel, get the channel **creator** to run \`/add-channel-perms <@you>\`.
           _If this is incorrect, please DM <@U059VC0UDEU>._`,
         response_type: "ephemeral",
       });
