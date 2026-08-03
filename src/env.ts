@@ -7,6 +7,9 @@ export const Env = z.object({
   SLACK_APP_TOKEN: z.string(),
   SLACK_BOT_TOKEN: z.string(),
 
+  SLACK_XOXC: z.string(),
+  SLACK_XOXD: z.string(),
+
   LOGSNAG_TOKEN: z.string(),
   LOGSNAG_PROJECT: z.string(),
 

@@ -9,6 +9,11 @@ const channelManagersResponseSchema = z.object({
   channel_managers: z.array(z.object({ user_id: z.string() })),
 });
 
+const legacyChannelManagersResponseSchema = z.object({
+  ok: z.literal(true),
+  role_assignments: z.array(z.object({ users: z.array(z.string()) })),
+});
+
 export const logger = pino({
   level: env.LOG_LEVEL,
 });
@@ -54,12 +59,42 @@ export async function getChannelManagers(channelId: string): Promise<string[]> {
     const response = await fetch(url, {
       signal: AbortSignal.timeout(5000),
     });
-    if (!response.ok) return [];
+    if (!response.ok) return getLegacyChannelManagers(channelId);
 
     const result = channelManagersResponseSchema.safeParse(await response.json());
-    if (!result.success) return [];
+    if (!result.success) return getLegacyChannelManagers(channelId);
 
     return result.data.channel_managers.map(({ user_id }) => user_id);
+  } catch {
+    return getLegacyChannelManagers(channelId);
+  }
+}
+
+async function getLegacyChannelManagers(channelId: string): Promise<string[]> {
+  const formData = new FormData();
+  formData.append("token", env.SLACK_XOXC);
+  formData.append("entity_id", channelId);
+
+  try {
+    const response = await fetch(
+      "https://slack.com/api/admin.roles.entity.listAssignments",
+      {
+        method: "POST",
+        body: formData,
+        headers: {
+          Cookie: `d=${encodeURIComponent(env.SLACK_XOXD)}`,
+        },
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+    if (!response.ok) return [];
+
+    const result = legacyChannelManagersResponseSchema.safeParse(
+      await response.json(),
+    );
+    if (!result.success) return [];
+
+    return result.data.role_assignments[0]?.users ?? [];
   } catch {
     return [];
   }
