@@ -1,5 +1,4 @@
 import pino from "pino";
-import type Slack from "@slack/bolt";
 import { stripIndents } from "common-tags";
 import { adminsTable, db, pingPermsTable } from "./db";
 import { and, eq } from "drizzle-orm";
@@ -12,7 +11,6 @@ export const logger = pino({
 export async function hasPerms(
   userId: string,
   channelId: string,
-  client: Slack.webApi.WebClient,
 ): Promise<boolean> {
   const [admin] = await db
     .select()
@@ -29,10 +27,7 @@ export async function hasPerms(
       ),
     );
 
-  const isChannelCreator =
-    (await getChannelCreator(channelId, client)) === userId;
-
-  if (admin != null || channelManagers.includes(userId) || isChannelCreator) {
+  if (admin != null || channelManagers.includes(userId)) {
     if (hasPermsEntry.length === 0) {
       await db.insert(pingPermsTable).values({
         slackId: userId,
@@ -46,35 +41,17 @@ export async function hasPerms(
 }
 
 export async function getChannelManagers(channelId: string): Promise<string[]> {
-  const formData = new FormData();
-  formData.append("token", env.SLACK_XOXC || "");
-  formData.append("entity_id", channelId);
+  const url = new URL("https://nemo.hackclub.com/channel-managers");
+  url.searchParams.set("channel_id", channelId);
 
-  const request = await fetch(
-    "https://slack.com/api/admin.roles.entity.listAssignments",
-    {
-      method: "POST",
-      body: formData,
-      headers: {
-        Cookie: `d=${encodeURIComponent(env.SLACK_XOXD)}`,
-      },
-    },
-  );
+  const response = await fetch(url);
+  if (!response.ok) return [];
 
-  const json = await request.json();
+  const json = (await response.json()) as {
+    channel_managers: { user_id: string }[];
+  };
 
-  if (!json.ok) return [];
-  return json.role_assignments[0]?.users || [];
-}
-
-export async function getChannelCreator(
-  channelId: string,
-  client: Slack.webApi.WebClient,
-): Promise<string | null> {
-  const channelInfo = await client.conversations.info({
-    channel: channelId,
-  });
-  return channelInfo?.channel?.creator || null;
+  return json.channel_managers.map(({ user_id }) => user_id);
 }
 
 export function generateRandomString(length: number) {
