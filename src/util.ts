@@ -3,6 +3,11 @@ import { stripIndents } from "common-tags";
 import { adminsTable, db, pingPermsTable } from "./db";
 import { and, eq } from "drizzle-orm";
 import { env } from "./env";
+import { z } from "zod";
+
+const channelManagersResponseSchema = z.object({
+  channel_managers: z.array(z.object({ user_id: z.string() })),
+});
 
 export const logger = pino({
   level: env.LOG_LEVEL,
@@ -16,7 +21,8 @@ export async function hasPerms(
     .select()
     .from(adminsTable)
     .where(eq(adminsTable.userId, userId));
-  const channelManagers = await getChannelManagers(channelId);
+  const channelManagers =
+    admin == null ? await getChannelManagers(channelId) : [];
   const hasPermsEntry = await db
     .select()
     .from(pingPermsTable)
@@ -44,14 +50,19 @@ export async function getChannelManagers(channelId: string): Promise<string[]> {
   const url = new URL("https://nemo.hackclub.com/channel-managers");
   url.searchParams.set("channel_id", channelId);
 
-  const response = await fetch(url);
-  if (!response.ok) return [];
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return [];
 
-  const json = (await response.json()) as {
-    channel_managers: { user_id: string }[];
-  };
+    const result = channelManagersResponseSchema.safeParse(await response.json());
+    if (!result.success) return [];
 
-  return json.channel_managers.map(({ user_id }) => user_id);
+    return result.data.channel_managers.map(({ user_id }) => user_id);
+  } catch {
+    return [];
+  }
 }
 
 export function generateRandomString(length: number) {
