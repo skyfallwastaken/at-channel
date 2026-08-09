@@ -68,6 +68,10 @@ async function sendPing(
     text: finalMessage,
     username: displayName,
     icon_url: avatar,
+    metadata: {
+      event_type: "at_channel_message",
+      event_payload: { source_user_id: userId },
+    },
     blocks: [
       {
         type: "section",
