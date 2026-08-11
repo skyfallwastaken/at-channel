@@ -1,4 +1,9 @@
-import { primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  primaryKey,
+  sqliteTable,
+  text,
+  integer,
+} from "drizzle-orm/sqlite-core";
 
 export const adminsTable = sqliteTable("admins", {
   userId: text("user_id").primaryKey(),
@@ -19,6 +24,17 @@ export const pingPermsTable = sqliteTable("pingPerms", {
   channelId: text("channel_id").notNull(),
 });
 
+export const scheduledPingsTable = sqliteTable("scheduledPings", {
+  id: text("id").primaryKey(),
+  slackId: text("slack_id").notNull(),
+  channelId: text("channel_id").notNull(),
+  message: text("message").notNull(),
+  type: text("type", { enum: ["channel", "here"] }).notNull(),
+  scheduledTime: integer("scheduled_time", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
 export type Admin = typeof adminsTable.$inferSelect;
 export type Ping = typeof pingsTable.$inferSelect;
 export type PingPerms = typeof pingPermsTable.$inferSelect;
+export type ScheduledPing = typeof scheduledPingsTable.$inferSelect;

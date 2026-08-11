@@ -59,6 +59,12 @@
         "description": "Shows the top 15 channel pingers or a specific user's ranking.",
         "usage_hint": "[@user]",
         "should_escape": true
+      },
+      {
+        "command": "/schedule-ping",
+        "description": "Schedules a @channel or @here ping for a future time.",
+        "usage_hint": "<channel|here> <time> <message>",
+        "should_escape": false
       }
     ]
   },
