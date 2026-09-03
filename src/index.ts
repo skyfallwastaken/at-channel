@@ -13,7 +13,6 @@ import {
   generatePermissionChangeErrorMessage,
   LIST_CHANNEL_PERMS_HAVERS_NAME,
   getChannelManagers,
-  getChannelCreator,
   generateListChannelPingersErrorMessage,
   AT_CHANNEL_LEADERBOARD_NAME,
   generateLeaderboardErrorMessage,
@@ -120,11 +119,10 @@ async function pingCommand(
   const { text: message } = payload;
 
   try {
-    if (!(await hasPerms(userId, channelId, client))) {
+    if (!(await hasPerms(userId, channelId))) {
       await respond({
         text: stripIndents`
           :tw_warning: *You need to be a channel manager to use this command.*
-          If this is a private channel, you'll need to add <@${botId}> to the channel.
           _If this is incorrect, please DM <@U059VC0UDEU>._
         `.trim(),
         response_type: "ephemeral",
@@ -185,7 +183,7 @@ async function addChannelPermsCommand({
   const targetId = match ? match[1] : null;
 
   try {
-    if (await hasPerms(userId, channelId, client)) {
+    if (await hasPerms(userId, channelId)) {
       if (!targetId) {
         await respond({
           text: `:tw_warning: *This is not a valid slack user!*
@@ -195,7 +193,7 @@ async function addChannelPermsCommand({
         });
         return;
       }
-      if (await hasPerms(targetId, channelId, client)) {
+      if (await hasPerms(targetId, channelId)) {
         await respond({
           text: `:tw_x: ${target} can already ping in <#${channelId}>! Silly goose, go try it!`,
         });
@@ -234,7 +232,6 @@ async function addChannelPermsCommand({
     } else {
       await respond({
         text: `:tw_warning: *You need to be a channel manager to use this command.*
-          If this is a private channel, you'll need to add <@${botId}> to the channel. If you didn't make the private channel, get the channel **creator** to run \`/add-channel-perms <@you>\`.
           _If this is incorrect, please DM <@U059VC0UDEU>._`,
         response_type: "ephemeral",
       });
@@ -272,7 +269,7 @@ async function removeChannelPermsCommand({
   const targetId = match ? match[1] : null;
 
   try {
-    if (await hasPerms(userId, channelId, client)) {
+    if (await hasPerms(userId, channelId)) {
       if (!targetId) {
         await respond({
           text: `:tw_warning: *This is not a valid slack user!*
@@ -282,7 +279,7 @@ async function removeChannelPermsCommand({
         });
         return;
       }
-      if (await hasPerms(targetId, channelId, client)) {
+      if (await hasPerms(targetId, channelId)) {
         await db
           .delete(pingPermsTable)
           .where(
@@ -325,7 +322,6 @@ async function removeChannelPermsCommand({
     } else {
       await respond({
         text: `:tw_warning: *You need to be a channel manager to use this command.*
-          If this is a private channel, you'll need to add <@${botId}> to the channel.
           _If this is incorrect, please DM <@U059VC0UDEU>._`,
         response_type: "ephemeral",
       });
@@ -366,8 +362,6 @@ async function listChannelPingersCommand({
 
     const admins = await db.select().from(adminsTable);
 
-    const channelCreator = await getChannelCreator(channelId, client);
-
     const channelManagers = await (async () => {
       try {
         return await getChannelManagers(channelId);
@@ -380,9 +374,6 @@ async function listChannelPingersCommand({
     perms.forEach((p) => userIds.add(p.slackId));
     admins.forEach((a) => userIds.add(a.userId));
     channelManagers.forEach((id) => userIds.add(id));
-    if (channelCreator) {
-      userIds.add(channelCreator);
-    }
 
     const filteredUserIds = new Set(
       Array.from(userIds).filter((id): id is string => typeof id === "string"),
