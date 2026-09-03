@@ -651,7 +651,7 @@ app.view(
       view.state.values.message.message_input.rich_text_value!,
     )
       .replaceAll("<!channel|channel>", "@channel")
-      .replaceAll("<!here>", "@here");
+      .replaceAll("<!here|here>", "@here");
     let finalMessage: string;
     if (message.includes(`@${type}`)) {
       finalMessage = message;

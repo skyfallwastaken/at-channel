@@ -25,7 +25,7 @@ const richTextElementToMrkdwn = (
 ): string => {
   switch (element.type) {
     case "broadcast":
-      return applyMrkdwnStyle(`<!${element.range}>`, element.style);
+      return applyMrkdwnStyle(`<!${element.range}|${element.range}>`, element.style);
     case "channel":
       return applyMrkdwnStyle(`<#${element.channel_id}>`, element.style);
     case "color":
