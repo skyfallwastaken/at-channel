@@ -863,7 +863,7 @@ app.event("app_mention", async ({ event, client }) => {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: ":tw_bell: Send this message as a ping? Pick *@channel* (everyone) or *@here* (only people online).",
+            text: ":tw_bell: Send this message as a ping? Pick *@channel* (everyone) or *@here* (only people online)!",
           },
         },
         {
