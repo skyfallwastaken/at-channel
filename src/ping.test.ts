@@ -23,22 +23,25 @@ test("keeps an inline mention in place, in either spelling", () => {
   expect(bodyOf(buildPingMessage("here", "hey <!here> folks").final)).toBe("hey <!here> folks");
 });
 
-test("extra blocks ride in both payloads after the body", () => {
-  const img = { type: "image" as const, slack_file: { id: "F1" }, alt_text: "pic" };
-  const { initial, final } = buildPingMessage("channel", "look", [img]);
-  expect(initial.blocks).toEqual([img]);
-  expect(final.blocks.map((b) => b.type)).toEqual(["section", "image"]);
+test("rich text body replaces the section in the final payload only", () => {
+  const rt = { type: "rich_text" as const, elements: [] };
+  const { initial, final } = buildPingMessage("channel", "hi @channel", rt);
+  expect(final.blocks[0]).toBe(rt);
+  expect(initial.attachments[0]?.blocks[0]?.text?.text).toBe("hi <!channel>");
 });
 
-test("blocksFromFiles turns images into slack_file image blocks and links the rest", () => {
-  const { blocksFromFiles } = require("./ping");
-  const blocks = blocksFromFiles([
-    { id: "F1", name: "a.png", mimetype: "image/png" },
-    { id: "F2", title: "notes.pdf", mimetype: "application/pdf", permalink: "https://x/y" },
-    { name: "no-id.png", mimetype: "image/png" },
-  ]);
-  expect(blocks).toEqual([
-    { type: "image", slack_file: { id: "F1" }, alt_text: "a.png" },
-    { type: "context", elements: [{ type: "mrkdwn", text: ":paperclip: <https://x/y|notes.pdf>" }] },
-  ]);
+test("richTextWithBroadcast swaps the bot mention in place and keeps other elements", () => {
+  const { richTextWithBroadcast } = require("./ping");
+  const link = { type: "link", url: "https://x.y/", text: "x.y", truncated: true };
+  const block = { type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "hi " }, { type: "user", user_id: "UBOT" }, { type: "text", text: " " }, link] }] };
+  const out = richTextWithBroadcast(block, "UBOT", "here");
+  expect(out.elements[0].elements).toEqual([{ type: "text", text: "hi " }, { type: "broadcast", range: "here" }, { type: "text", text: " " }, link]);
+});
+
+test("richTextWithBroadcast prepends a broadcast when there is none", () => {
+  const { richTextWithBroadcast } = require("./ping");
+  const block = { type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "plain" }] }] };
+  const out = richTextWithBroadcast(block, "UBOT", "channel");
+  expect(out.elements[0]).toEqual({ type: "rich_text_section", elements: [{ type: "broadcast", range: "channel" }, { type: "text", text: " " }] });
+  expect(out.elements[1].elements[0].text).toBe("plain");
 });

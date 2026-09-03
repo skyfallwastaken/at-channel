@@ -20,12 +20,7 @@ import {
 } from "./util";
 import { richTextBlockToMrkdwn } from "./richText";
 import buildEditPingModal from "./editPingModal";
-import {
-  buildPingMessage,
-  postPing,
-  blocksFromFiles,
-  nonBodyBlocks,
-} from "./ping";
+import { buildPingMessage, postPing, richTextWithBroadcast } from "./ping";
 import { db, adminsTable, pingsTable, pingPermsTable } from "./db";
 import { and, eq, sql } from "drizzle-orm";
 import { LogSnag } from "@logsnag/node";
@@ -64,7 +59,8 @@ async function sendPing(
   userId: string,
   channelId: string,
   client: Slack.webApi.WebClient,
-  extraBlocks: Slack.types.AnyBlock[] = [],
+  richText?: Slack.types.RichTextBlock,
+  filePermalinks: string[] = [],
 ) {
   const user = await client.users.info({ user: userId });
   const displayName =
@@ -79,7 +75,8 @@ async function sendPing(
       event_type: "at_channel_message",
       event_payload: { source_user_id: userId },
     },
-    extraBlocks,
+    richText,
+    filePermalinks,
   });
 
   await Promise.all([
@@ -640,24 +637,21 @@ app.view(
   async ({ ack, respond, client, view, body }) => {
     await ack();
     const { channelId, ts, type, rayId } = JSON.parse(view.private_metadata);
-    const message = richTextBlockToMrkdwn(
+    const richText = richTextWithBroadcast(
       // biome-ignore lint/style/noNonNullAssertion: Will always be there - it's a required field
       view.state.values.message.message_input.rich_text_value!,
-    )
+      botId as string,
+      type,
+    );
+    const message = richTextBlockToMrkdwn(richText)
       .replaceAll("<!channel>", "@channel")
       .replaceAll("<!here>", "@here");
-    // Keep any image/file blocks the ping already carries.
-    const current = await client.conversations
-      .history({ channel: channelId, latest: ts, oldest: ts, inclusive: true, limit: 1 })
-      .catch(() => null);
-    const extraBlocks = nonBodyBlocks(current?.messages?.[0]?.blocks);
-
     try {
       await Promise.all([
         client.chat.update({
           channel: channelId,
           ts,
-          ...buildPingMessage(type, message, extraBlocks).final,
+          ...buildPingMessage(type, message, richText).final,
         }),
         logsnag
           .track({
@@ -728,11 +722,11 @@ async function loadMentionPing(
   const original = history.messages?.[0];
   if (!original || original.ts !== ts) return null;
 
-  const richText = original.blocks?.find((b) => b.type === "rich_text");
+  const richText = original.blocks?.find((b) => b.type === "rich_text") as
+    | Slack.types.RichTextBlock
+    | undefined;
   const message = (
-    richText
-      ? richTextBlockToMrkdwn(richText as Slack.types.RichTextBlock)
-      : (original.text ?? "")
+    richText ? richTextBlockToMrkdwn(richText) : (original.text ?? "")
   )
     // Keep the ping where the user put the mention; the type is filled in later.
     .replaceAll(`<@${botId}>`, PING_PLACEHOLDER)
@@ -741,8 +735,10 @@ async function loadMentionPing(
   const type: "channel" | "here" = /<!here>|@here/.test(message)
     ? "here"
     : "channel";
-  const extraBlocks = blocksFromFiles(original.files ?? []);
-  return { message, type, extraBlocks };
+  const filePermalinks = (original.files ?? [])
+    .map((f) => f.permalink)
+    .filter((p): p is string => Boolean(p));
+  return { message, type, filePermalinks, richText };
 }
 
 // Sends the ping, then deletes the original as its author or asks them to
@@ -755,7 +751,18 @@ async function sendMentionPing(
   ping: NonNullable<Awaited<ReturnType<typeof loadMentionPing>>>,
 ) {
   const message = ping.message.replaceAll(PING_PLACEHOLDER, `@${ping.type}`);
-  await sendPing(ping.type, message, userId, channelId, client, ping.extraBlocks);
+  const richText = ping.richText
+    ? richTextWithBroadcast(ping.richText, botId as string, ping.type)
+    : undefined;
+  await sendPing(
+    ping.type,
+    message,
+    userId,
+    channelId,
+    client,
+    richText,
+    ping.filePermalinks,
+  );
 
   const outcome = await deleteAsUser(userId, channelId, ts);
   if (outcome === "deleted") return;
@@ -834,7 +841,7 @@ app.event("app_mention", async ({ event, client }) => {
 
     const ping = await loadMentionPing(client, channelId, ts);
     if (!ping) return;
-    if (!ping.message && ping.extraBlocks.length === 0) {
+    if (!ping.message && ping.filePermalinks.length === 0) {
       await ephemeral(":tw_warning: Add some text or an image to your ping.");
       return;
     }

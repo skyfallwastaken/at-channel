@@ -40,9 +40,12 @@ const richTextElementToMrkdwn = (
     case "emoji":
       return `:${element.name}:`;
     case "link": {
-      const formattedText = element.text
-        ? `<${element.url}|${element.text}>`
-        : element.url;
+      // `truncated` marks Slack's folded display of a bare URL; the text is
+      // just the shortened URL, so keep the link unlabelled.
+      const formattedText =
+        element.text && !(element as { truncated?: boolean }).truncated
+          ? `<${element.url}|${element.text}>`
+          : element.url;
       return applyMrkdwnStyle(formattedText, element.style);
     }
     case "team": // There is no documented way to display this nicely in mrkdwn
