@@ -650,7 +650,7 @@ app.view(
       // biome-ignore lint/style/noNonNullAssertion: Will always be there - it's a required field
       view.state.values.message.message_input.rich_text_value!,
     )
-      .replaceAll("<!channel>", "@channel")
+      .replaceAll("<!channel|channel>", "@channel")
       .replaceAll("<!here>", "@here");
     let finalMessage: string;
     if (message.includes(`@${type}`)) {
