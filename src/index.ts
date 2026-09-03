@@ -710,6 +710,8 @@ const NO_PERMS_MESSAGE = stripIndents`
   _If this is incorrect, please DM <@U059VC0UDEU>._
 `.trim();
 
+const PING_PLACEHOLDER = "<!ping>";
+
 // Refetches the mentioning message and turns it into ping text + blocks.
 async function loadMentionPing(
   client: Slack.webApi.WebClient,
@@ -732,7 +734,8 @@ async function loadMentionPing(
       ? richTextBlockToMrkdwn(richText as Slack.types.RichTextBlock)
       : (original.text ?? "")
   )
-    .replaceAll(`<@${botId}>`, "")
+    // Keep the ping where the user put the mention; the type is filled in later.
+    .replaceAll(`<@${botId}>`, PING_PLACEHOLDER)
     .replace(/[ \t]{2,}/g, " ")
     .trim();
   const type: "channel" | "here" = /<!here>|@here/.test(message)
@@ -751,7 +754,8 @@ async function sendMentionPing(
   ts: string,
   ping: NonNullable<Awaited<ReturnType<typeof loadMentionPing>>>,
 ) {
-  await sendPing(ping.type, ping.message, userId, channelId, client, ping.extraBlocks);
+  const message = ping.message.replaceAll(PING_PLACEHOLDER, `@${ping.type}`);
+  await sendPing(ping.type, message, userId, channelId, client, ping.extraBlocks);
 
   const outcome = await deleteAsUser(userId, channelId, ts);
   if (outcome === "deleted") return;
@@ -841,34 +845,37 @@ app.event("app_mention", async ({ event, client }) => {
       return;
     }
 
-    const value = JSON.stringify({ channelId, ts, userId });
+    const value = (type: "channel" | "here") =>
+      JSON.stringify({ channelId, ts, userId, type });
+    const button = (type: "channel" | "here") => ({
+      type: "button" as const,
+      text: { type: "plain_text" as const, text: `Send @${type}` },
+      action_id: `send_mention_ping_${type}`,
+      value: value(type),
+      ...(type === ping.type ? { style: "primary" as const } : {}),
+    });
     await client.chat.postEphemeral({
       channel: channelId,
       user: userId,
-      text: `Send this message as an @${ping.type} ping?`,
+      text: "Send this message as a ping?",
       blocks: [
         {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `:tw_bell: Send this message to everyone as an *@${ping.type}* ping?`,
+            text: ":tw_bell: Send this message as a ping? Pick *@channel* (everyone) or *@here* (only people online).",
           },
         },
         {
           type: "actions",
           elements: [
-            {
-              type: "button",
-              style: "primary",
-              text: { type: "plain_text", text: `Send @${ping.type} ping` },
-              action_id: "send_mention_ping",
-              value,
-            },
+            button("channel"),
+            button("here"),
             {
               type: "button",
               text: { type: "plain_text", text: "Cancel" },
               action_id: "cancel_mention_ping",
-              value,
+              value: value(ping.type),
             },
           ],
         },
@@ -883,12 +890,12 @@ app.event("app_mention", async ({ event, client }) => {
   }
 });
 
-app.action("send_mention_ping", async ({ ack, body, action, respond, client }) => {
+app.action(/^send_mention_ping_(channel|here)$/, async ({ ack, body, action, respond, client }) => {
   await ack();
   const rayId = `mention-confirm-${generateRandomString(12)}`;
-  const { channelId, ts, userId } = JSON.parse(
+  const { channelId, ts, userId, type } = JSON.parse(
     (action as { value: string }).value,
-  ) as { channelId: string; ts: string; userId: string };
+  ) as { channelId: string; ts: string; userId: string; type: "channel" | "here" };
   if (body.user.id !== userId) return;
 
   try {
@@ -905,7 +912,7 @@ app.action("send_mention_ping", async ({ ack, body, action, respond, client }) =
       return;
     }
     await respond({ delete_original: true });
-    await sendMentionPing(client, userId, channelId, ts, ping);
+    await sendMentionPing(client, userId, channelId, ts, { ...ping, type });
   } catch (e) {
     console.log(e);
     logger.error(`${rayId}: Failed to send confirmed mention ping: ${e}`);
