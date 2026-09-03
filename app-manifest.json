@@ -29,13 +29,13 @@
                 "command": "/channel",
                 "description": "Does a @channel ping.",
                 "usage_hint": "<message>",
-                "should_escape": false
+                "should_escape": true
             },
             {
                 "command": "/here",
                 "description": "Does a @here ping.",
                 "usage_hint": "<message>",
-                "should_escape": false
+                "should_escape": true
             },
             {
                 "command": "/add-channel-perms",
