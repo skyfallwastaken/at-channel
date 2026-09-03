@@ -10,5 +10,8 @@ COPY . .
 # Install dependencies
 RUN bun install --frozen-lockfile
 
+# OAuth callback server (see src/oauth.ts)
+EXPOSE 3000
+
 # Run the server when the container launches
 ENTRYPOINT ["bun", "start"]

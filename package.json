@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "dev": "LOG_LEVEL=debug NODE_ENV=development bun --watch .",
-    "start": "LOG_LEVEL=debug NODE_ENV=production bun . | pino-pretty"
+    "start": "LOG_LEVEL=debug NODE_ENV=production bun . | pino-pretty",
+    "migrate": "drizzle-kit migrate",
+    "generate": "drizzle-kit generate"
   },
   "devDependencies": {
     "@types/bun": "latest",

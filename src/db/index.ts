@@ -1,4 +1,5 @@
 import { drizzle } from "drizzle-orm/libsql";
+import { migrate } from "drizzle-orm/libsql/migrator";
 import { env } from "../env";
 
 export const db = drizzle({
@@ -8,4 +9,11 @@ export const db = drizzle({
   },
 });
 
-export { adminsTable, pingsTable, pingPermsTable } from "./schema";
+await migrate(db, { migrationsFolder: "./migrations" });
+
+export {
+  adminsTable,
+  pingsTable,
+  pingPermsTable,
+  userTokensTable,
+} from "./schema";

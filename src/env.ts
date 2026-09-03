@@ -10,6 +10,12 @@ export const Env = z.object({
   SLACK_XOXC: z.string(),
   SLACK_XOXD: z.string(),
 
+  SLACK_CLIENT_ID: z.string(),
+  SLACK_CLIENT_SECRET: z.string(),
+  OAUTH_STATE_SECRET: z.string(),
+  PUBLIC_URL: z.string().url(),
+  PORT: z.coerce.number().default(3000),
+
   LOGSNAG_TOKEN: z.string(),
   LOGSNAG_PROJECT: z.string(),
 

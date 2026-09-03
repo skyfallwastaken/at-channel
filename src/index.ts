@@ -20,12 +20,25 @@ import {
 } from "./util";
 import { richTextBlockToMrkdwn } from "./richText";
 import buildEditPingModal from "./editPingModal";
-import { buildPingMessage, postPing } from "./ping";
+import {
+  buildPingMessage,
+  postPing,
+  blocksFromFiles,
+  nonBodyBlocks,
+} from "./ping";
 import { db, adminsTable, pingsTable, pingPermsTable } from "./db";
 import { and, eq, sql } from "drizzle-orm";
 import { LogSnag } from "@logsnag/node";
 import type Slack from "@slack/bolt";
 import { stripIndents } from "common-tags";
+import {
+  authUrl,
+  deleteAsUser,
+  forgetToken,
+  hasUserToken,
+  rememberPending,
+  startOAuthServer,
+} from "./oauth";
 
 // LogSnag is used to check that pings are actually getting sent
 // Ping contents aren't stored
@@ -51,6 +64,7 @@ async function sendPing(
   userId: string,
   channelId: string,
   client: Slack.webApi.WebClient,
+  extraBlocks: Slack.types.AnyBlock[] = [],
 ) {
   const user = await client.users.info({ user: userId });
   const displayName =
@@ -65,6 +79,7 @@ async function sendPing(
       event_type: "at_channel_message",
       event_payload: { source_user_id: userId },
     },
+    extraBlocks,
   });
 
   await Promise.all([
@@ -122,6 +137,10 @@ async function pingCommand(
     }
 
     await sendPing(pingType, message, userId, channelId, client);
+    await respond({
+      text: `:bulb: *hint:* you can now mention <@${botId}> in a normal message to send pings with images and links.`,
+      response_type: "ephemeral",
+    }).catch(() => {});
   } catch (e) {
     console.log(e);
     logger.error(`${rayId}: Failed to send ping: ${e}`);
@@ -627,12 +646,18 @@ app.view(
     )
       .replaceAll("<!channel>", "@channel")
       .replaceAll("<!here>", "@here");
+    // Keep any image/file blocks the ping already carries.
+    const current = await client.conversations
+      .history({ channel: channelId, latest: ts, oldest: ts, inclusive: true, limit: 1 })
+      .catch(() => null);
+    const extraBlocks = nonBodyBlocks(current?.messages?.[0]?.blocks);
+
     try {
       await Promise.all([
         client.chat.update({
           channel: channelId,
           ts,
-          ...buildPingMessage(type, message).final,
+          ...buildPingMessage(type, message, extraBlocks).final,
         }),
         logsnag
           .track({
@@ -674,6 +699,241 @@ app.view(
   },
 );
 
+// Composer flow: write a normal message, attach images the usual way, and
+// mention the bot in it. The message is reposted as a ping and the original is
+// deleted (if the author has authorised that) or marked with a reaction.
+// Authors without a stored token are asked to confirm first, so a stray
+// mention can't fire a channel-wide ping by itself.
+
+const NO_PERMS_MESSAGE = stripIndents`
+  :tw_warning: *You need to be a channel manager to ping.*
+  _If this is incorrect, please DM <@U059VC0UDEU>._
+`.trim();
+
+// Refetches the mentioning message and turns it into ping text + blocks.
+async function loadMentionPing(
+  client: Slack.webApi.WebClient,
+  channelId: string,
+  ts: string,
+) {
+  const history = await client.conversations.history({
+    channel: channelId,
+    latest: ts,
+    oldest: ts,
+    inclusive: true,
+    limit: 1,
+  });
+  const original = history.messages?.[0];
+  if (!original || original.ts !== ts) return null;
+
+  const richText = original.blocks?.find((b) => b.type === "rich_text");
+  const message = (
+    richText
+      ? richTextBlockToMrkdwn(richText as Slack.types.RichTextBlock)
+      : (original.text ?? "")
+  )
+    .replaceAll(`<@${botId}>`, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  const type: "channel" | "here" = /<!here>|@here/.test(message)
+    ? "here"
+    : "channel";
+  const extraBlocks = blocksFromFiles(original.files ?? []);
+  return { message, type, extraBlocks };
+}
+
+// Sends the ping, then deletes the original as its author or asks them to
+// authorise that once.
+async function sendMentionPing(
+  client: Slack.webApi.WebClient,
+  userId: string,
+  channelId: string,
+  ts: string,
+  ping: NonNullable<Awaited<ReturnType<typeof loadMentionPing>>>,
+) {
+  await sendPing(ping.type, ping.message, userId, channelId, client, ping.extraBlocks);
+
+  const outcome = await deleteAsUser(userId, channelId, ts);
+  if (outcome === "deleted") return;
+
+  await client.reactions
+    .add({ channel: channelId, timestamp: ts, name: "bell" })
+    .catch(() => {});
+
+  if (outcome === "no_token") {
+    await rememberPending(userId, channelId, ts);
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: ":tw_white_check_mark: Ping sent! Authorise at-channel once and it will delete your original messages for you from now on.",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: ":tw_white_check_mark: *Ping sent!* Authorise at-channel once and it will delete your original messages for you from now on (this one included). Until then, mentions will ask you to confirm before pinging.",
+          },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              style: "primary",
+              text: { type: "plain_text", text: "Authorise auto-delete" },
+              url: authUrl(userId),
+              action_id: "authorise_auto_delete",
+            },
+          ],
+        },
+      ],
+    });
+  } else {
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: ":tw_white_check_mark: Ping sent! I couldn't delete your original message, so you may want to remove it yourself.",
+    });
+  }
+}
+
+app.event("app_mention", async ({ event, client }) => {
+  const rayId = `mention-${generateRandomString(12)}`;
+  const { channel: channelId, user: userId, ts } = event;
+  if (!userId) return;
+  const ephemeral = (text: string) =>
+    client.chat
+      .postEphemeral({ channel: channelId, user: userId, text })
+      .catch(() => {});
+
+  try {
+    if (event.thread_ts) {
+      await ephemeral(
+        ":tw_warning: Pings can't be sent from inside a thread. Mention me in a top-level message instead.",
+      );
+      return;
+    }
+
+    if (channelId === "C09BQEC01FZ") {
+      await client.chat.postMessage({
+        channel: channelId,
+        text: `<@${userId}> tried to ping. i'm tired boss. no pings for you.`,
+      });
+      return;
+    }
+
+    if (!(await hasPerms(userId, channelId, client))) {
+      await ephemeral(NO_PERMS_MESSAGE);
+      logger.debug(`${rayId}: ${userId} mentioned the bot without perms`);
+      return;
+    }
+
+    const ping = await loadMentionPing(client, channelId, ts);
+    if (!ping) return;
+    if (!ping.message && ping.extraBlocks.length === 0) {
+      await ephemeral(":tw_warning: Add some text or an image to your ping.");
+      return;
+    }
+
+    // Authorised users get the ping straight away; everyone else confirms.
+    if (await hasUserToken(userId)) {
+      await sendMentionPing(client, userId, channelId, ts, ping);
+      return;
+    }
+
+    const value = JSON.stringify({ channelId, ts, userId });
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: `Send this message as an @${ping.type} ping?`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `:tw_bell: Send this message to everyone as an *@${ping.type}* ping?`,
+          },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              style: "primary",
+              text: { type: "plain_text", text: `Send @${ping.type} ping` },
+              action_id: "send_mention_ping",
+              value,
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "Cancel" },
+              action_id: "cancel_mention_ping",
+              value,
+            },
+          ],
+        },
+      ],
+    });
+  } catch (e) {
+    console.log(e);
+    logger.error(`${rayId}: Failed to handle mention: ${e}`);
+    await ephemeral(
+      generatePingErrorMessage(rayId, "channel", "", userId, botId as string, e),
+    );
+  }
+});
+
+app.action("send_mention_ping", async ({ ack, body, action, respond, client }) => {
+  await ack();
+  const rayId = `mention-confirm-${generateRandomString(12)}`;
+  const { channelId, ts, userId } = JSON.parse(
+    (action as { value: string }).value,
+  ) as { channelId: string; ts: string; userId: string };
+  if (body.user.id !== userId) return;
+
+  try {
+    if (!(await hasPerms(userId, channelId, client))) {
+      await respond({ text: NO_PERMS_MESSAGE, replace_original: true });
+      return;
+    }
+    const ping = await loadMentionPing(client, channelId, ts);
+    if (!ping) {
+      await respond({
+        text: ":tw_warning: I can't find your original message any more, so nothing was sent.",
+        replace_original: true,
+      });
+      return;
+    }
+    await respond({ delete_original: true });
+    await sendMentionPing(client, userId, channelId, ts, ping);
+  } catch (e) {
+    console.log(e);
+    logger.error(`${rayId}: Failed to send confirmed mention ping: ${e}`);
+    await respond({
+      text: generatePingErrorMessage(rayId, "channel", "", userId, botId as string, e),
+      replace_original: true,
+    });
+  }
+});
+
+app.action("cancel_mention_ping", async ({ ack, respond }) => {
+  await ack();
+  await respond({ delete_original: true });
+});
+
+// The "Authorise" button is a link button; Slack still sends an action we must ack.
+app.action("authorise_auto_delete", async ({ ack }) => {
+  await ack();
+});
+
+// Drop stored user tokens Slack tells us are gone.
+app.event("tokens_revoked", async ({ event }) => {
+  for (const userId of event.tokens.oauth ?? []) {
+    await forgetToken(userId);
+    logger.info(`${userId} revoked auto-delete`);
+  }
+});
+
 app.command(CHANNEL_COMMAND_NAME, pingCommand.bind(null, "channel"));
 app.command(HERE_COMMAND_NAME, pingCommand.bind(null, "here"));
 app.command(ADD_CHANNEL_PERMS_NAME, addChannelPermsCommand.bind(null));
@@ -682,5 +942,6 @@ app.command(LIST_CHANNEL_PERMS_HAVERS_NAME, listChannelPingersCommand);
 app.command(AT_CHANNEL_LEADERBOARD_NAME, leaderboardCommand);
 
 await app.start();
+startOAuthServer();
 
 logger.info("Started @channel!");

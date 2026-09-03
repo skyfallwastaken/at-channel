@@ -1,86 +1,105 @@
 {
-  "display_information": {
-    "name": "at-channel",
-    "description": "Run /channel or /here to do a @channel/@here ping!",
-    "background_color": "#2051d6",
-    "long_description": "Run /channel or /here to do a @channel/@here ping!\r\nYou'll need to be a channel manager to run the commands.\r\n\r\nOpen source: https://github.com/SkyfallWasTaken/at-channel\r\nMade by @skyfall.\r\n\r\n\r\nContributors:\r\n@skyfall\r\n@sahana"
-  },
-  "features": {
-    "bot_user": {
-      "display_name": "at-channel",
-      "always_online": false
+    "display_information": {
+        "name": "at-channel",
+        "description": "Run /channel or /here to do a @channel/@here ping!",
+        "background_color": "#2051d6",
+        "long_description": "Run /channel or /here to do a @channel/@here ping!\r\nYou'll need to be a channel manager to run the commands.\r\n\r\nOpen source @ https://github.com/skyfallwastaken/at-channel\r\n\r\nContributors:\r\n@skyfall\r\n@sahana"
     },
-    "shortcuts": [
-      {
-        "name": "Edit this message",
-        "type": "message",
-        "callback_id": "edit_ping",
-        "description": "Edits this ping. Only available if you sent this ping."
-      },
-      {
-        "name": "Delete this message",
-        "type": "message",
-        "callback_id": "delete_ping",
-        "description": "Deletes this ping. Only available if you sent this ping."
-      }
-    ],
-    "slash_commands": [
-      {
-        "command": "/channel",
-        "description": "Does a @channel ping.",
-        "usage_hint": "<message>",
-        "should_escape": false
-      },
-      {
-        "command": "/here",
-        "description": "Does a @here ping.",
-        "usage_hint": "<message>",
-        "should_escape": false
-      },
-      {
-        "command": "/add-channel-perms",
-        "description": "Allows the mentioned person to ping.",
-        "usage_hint": "@person",
-        "should_escape": true
-      },
-      {
-        "command": "/remove-channel-perms",
-        "description": "Removes the mentioned person's ability ping.",
-        "usage_hint": "@person",
-        "should_escape": true
-      },
-      {
-        "command": "/list-channel-pingers",
-        "description": "Lists the people who can ping @channel/here in this channel.",
-        "should_escape": true
-      },
-      {
-        "command": "/at-channel-leaderboard",
-        "description": "Shows the top 15 channel pingers or a specific user's ranking.",
-        "usage_hint": "[@user]",
-        "should_escape": true
-      }
-    ]
-  },
-  "oauth_config": {
-    "scopes": {
-      "bot": [
-        "channels:read",
-        "chat:write",
-        "chat:write.customize",
-        "chat:write.public",
-        "commands",
-        "users:read",
-        "groups:read"
-      ]
+    "features": {
+        "bot_user": {
+            "display_name": "at-channel",
+            "always_online": false
+        },
+        "shortcuts": [
+            {
+                "name": "Edit this message",
+                "type": "message",
+                "callback_id": "edit_ping",
+                "description": "Edits this ping. Only available if you sent this ping."
+            },
+            {
+                "name": "Delete this message",
+                "type": "message",
+                "callback_id": "delete_ping",
+                "description": "Deletes this ping. Only available if you sent this ping."
+            }
+        ],
+        "slash_commands": [
+            {
+                "command": "/channel",
+                "description": "Does a @channel ping.",
+                "usage_hint": "<message>",
+                "should_escape": false
+            },
+            {
+                "command": "/here",
+                "description": "Does a @here ping.",
+                "usage_hint": "<message>",
+                "should_escape": false
+            },
+            {
+                "command": "/add-channel-perms",
+                "description": "Allows the mentioned person to ping.",
+                "usage_hint": "@person",
+                "should_escape": true
+            },
+            {
+                "command": "/remove-channel-perms",
+                "description": "Removes the mentioned person's ability ping.",
+                "usage_hint": "@person",
+                "should_escape": true
+            },
+            {
+                "command": "/list-channel-pingers",
+                "description": "Lists the people who can ping @channel/here in this channel.",
+                "should_escape": true
+            },
+            {
+                "command": "/at-channel-leaderboard",
+                "description": "Shows the top 15 channel pingers or a specific user's ranking.",
+                "usage_hint": "[optional: whodunnit?]",
+                "should_escape": true
+            }
+        ]
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "channels:read",
+                "chat:write",
+                "chat:write.customize",
+                "chat:write.public",
+                "commands",
+                "users:read",
+                "groups:read",
+                "app_mentions:read",
+                "channels:history",
+                "groups:history",
+                "files:read",
+                "reactions:write"
+            ],
+            "user": [
+                "chat:write"
+            ]
+        },
+        "pkce_enabled": false,
+        "redirect_urls": [
+            "https://atchannel.mahadk.com/oauth/callback"
+        ]
+    },
+    "settings": {
+        "interactivity": {
+            "is_enabled": true
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": true,
+        "token_rotation_enabled": false,
+        "is_mcp_enabled": false,
+        "event_subscriptions": {
+            "bot_events": [
+                "app_mention",
+                "tokens_revoked"
+            ]
+        }
     }
-  },
-  "settings": {
-    "interactivity": {
-      "is_enabled": true
-    },
-    "org_deploy_enabled": false,
-    "socket_mode_enabled": true,
-    "token_rotation_enabled": false
-  }
 }
