@@ -20,6 +20,7 @@ import {
 } from "./util";
 import { richTextBlockToMrkdwn } from "./richText";
 import buildEditPingModal from "./editPingModal";
+import { buildPingMessage, postPing } from "./ping";
 import { db, adminsTable, pingsTable, pingPermsTable } from "./db";
 import { and, eq, sql } from "drizzle-orm";
 import { LogSnag } from "@logsnag/node";
@@ -51,51 +52,25 @@ async function sendPing(
   channelId: string,
   client: Slack.webApi.WebClient,
 ) {
-  let finalMessage: string;
-  if (message.includes(`@${type}`)) {
-    finalMessage = message;
-  } else {
-    finalMessage = `@${type} ${message}`;
-  }
-
   const user = await client.users.info({ user: userId });
   const displayName =
     user?.user?.profile?.display_name || user?.user?.name || "<unknown>";
   const avatar =
     user?.user?.profile?.image_original || user?.user?.profile?.image_512;
 
-  const payload = {
-    text: finalMessage,
+  const ts = await postPing(client, channelId, type, message, {
     username: displayName,
     icon_url: avatar,
     metadata: {
       event_type: "at_channel_message",
       event_payload: { source_user_id: userId },
     },
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: finalMessage,
-        },
-      },
-    ],
-  };
-
-  const response = await client.chat.postMessage({
-    channel: channelId,
-    ...payload,
   });
-
-  if (!response.ts) {
-    throw new Error("Failed to send ping");
-  }
 
   await Promise.all([
     db.insert(pingsTable).values({
       slackId: userId,
-      ts: response.ts,
+      ts,
       type,
     }),
     logsnag
@@ -107,7 +82,7 @@ async function sendPing(
         tags: {
           type,
           channel: channelId,
-          ts: response.ts as string,
+          ts,
           user: userId,
         },
       })
@@ -652,28 +627,12 @@ app.view(
     )
       .replaceAll("<!channel>", "@channel")
       .replaceAll("<!here>", "@here");
-    let finalMessage: string;
-    if (message.includes(`@${type}`)) {
-      finalMessage = message;
-    } else {
-      finalMessage = `@${type} ${message}`;
-    }
-
     try {
       await Promise.all([
         client.chat.update({
           channel: channelId,
           ts,
-          text: finalMessage,
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: finalMessage,
-              },
-            },
-          ],
+          ...buildPingMessage(type, message).final,
         }),
         logsnag
           .track({
