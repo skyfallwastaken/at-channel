@@ -125,3 +125,36 @@ export function startOAuthServer() {
   logger.info(`OAuth server listening on ${server.url}`);
   return server;
 }
+
+export async function subscribeToThread(
+  userId: string,
+  channelId: string,
+  threadTs: string,
+): Promise<"subscribed" | "no_token" | "failed"> {
+  const [row] = await db
+    .select()
+    .from(userTokensTable)
+    .where(eq(userTokensTable.slackId, userId));
+  if (!row?.token) return "no_token";
+
+  const client = new WebClient(row.token);
+  try {
+    const reply = await client.chat.postMessage({
+      channel: channelId,
+      thread_ts: threadTs,
+      text: "…",
+    });
+    if (reply.ts) {
+      await client.chat.delete({ channel: channelId, ts: reply.ts });
+    }
+    return "subscribed";
+  } catch (e: unknown) {
+    const code = (e as { data?: { error?: string } })?.data?.error;
+    if (code === "invalid_auth" || code === "token_revoked" || code === "account_inactive") {
+      await forgetToken(userId);
+      return "no_token";
+    }
+    logger.error(`Failed to subscribe ${userId} to ${channelId}/${threadTs}: ${e}`);
+    return "failed";
+  }
+}

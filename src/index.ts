@@ -31,6 +31,7 @@ import {
   deleteAsUser,
   forgetToken,
   rememberPending,
+  subscribeToThread,
   startOAuthServer,
 } from "./oauth";
 
@@ -99,6 +100,8 @@ async function sendPing(
       })
       .catch(() => {}),
   ]);
+
+  return ts;
 }
 
 async function pingCommand(
@@ -132,9 +135,14 @@ async function pingCommand(
       return;
     }
 
-    await sendPing(pingType, message, userId, channelId, client);
+    const ts = await sendPing(pingType, message, userId, channelId, client);
+    const subscribed = await subscribeToThread(userId, channelId, ts);
+    const hint =
+      subscribed === "no_token"
+        ? ` <${authUrl(userId)}|authorise at-channel> to get notified of replies to your pings.`
+        : "";
     await respond({
-      text: `:bulb: *hint:* you can now mention <@${botId}> in a normal message to send pings with images and links.`,
+      text: `:bulb: *hint:* you can now mention <@${botId}> in a normal message to send pings with images and links.${hint}`,
       response_type: "ephemeral",
     }).catch(() => {});
   } catch (e) {
@@ -744,7 +752,7 @@ async function sendMentionPing(
   const richText = ping.richText
     ? richTextWithBroadcast(ping.richText, botId as string, ping.type)
     : undefined;
-  await sendPing(
+  const pingTs = await sendPing(
     ping.type,
     message,
     userId,
@@ -754,7 +762,10 @@ async function sendMentionPing(
     ping.filePermalinks,
   );
 
-  const outcome = await deleteAsUser(userId, channelId, ts);
+  const [outcome] = await Promise.all([
+    deleteAsUser(userId, channelId, ts),
+    subscribeToThread(userId, channelId, pingTs),
+  ]);
   if (outcome === "deleted") return;
 
   await client.reactions
@@ -766,13 +777,13 @@ async function sendMentionPing(
     await client.chat.postEphemeral({
       channel: channelId,
       user: userId,
-      text: ":tw_white_check_mark: Ping sent! Authorise at-channel once and it will delete your original messages for you from now on.",
+      text: ":tw_white_check_mark: Ping sent! Authorise at-channel once and it will delete your original messages for you and notify you of replies to your pings.",
       blocks: [
         {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: ":tw_white_check_mark: *Ping sent!* Authorise at-channel once and it will delete your original messages for you from now on (this one included).",
+            text: ":tw_white_check_mark: *Ping sent!* Authorise at-channel once and it will delete your original messages for you from now on (this one included) and notify you of replies to your pings.",
           },
         },
         {
