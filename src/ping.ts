@@ -19,10 +19,6 @@ const section = (text: string): Slack.types.SectionBlock => ({
 
 type RichText = Slack.types.RichTextBlock;
 
-// `message` is mrkdwn and is used for the notification attachment and the
-// `text` fallback. When `richText` is given (a rich_text block that already
-// contains a broadcast element), it is posted verbatim as the body so Slack
-// keeps folded links, lists, code and other formatting exactly as typed.
 export function buildPingMessage(
   type: "channel" | "here",
   message: string,

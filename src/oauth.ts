@@ -20,14 +20,6 @@ export async function rememberPending(userId: string, channelId: string, ts: str
     });
 }
 
-export async function hasUserToken(userId: string) {
-  const [row] = await db
-    .select({ token: userTokensTable.token })
-    .from(userTokensTable)
-    .where(eq(userTokensTable.slackId, userId));
-  return Boolean(row?.token);
-}
-
 export async function forgetToken(userId: string) {
   await db.delete(userTokensTable).where(eq(userTokensTable.slackId, userId));
 }

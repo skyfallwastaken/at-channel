@@ -30,7 +30,6 @@ import {
   authUrl,
   deleteAsUser,
   forgetToken,
-  hasUserToken,
   rememberPending,
   startOAuthServer,
 } from "./oauth";
@@ -693,12 +692,6 @@ app.view(
   },
 );
 
-// Composer flow: write a normal message, attach images the usual way, and
-// mention the bot in it. The message is reposted as a ping and the original is
-// deleted (if the author has authorised that) or marked with a reaction.
-// Authors without a stored token are asked to confirm first, so a stray
-// mention can't fire a channel-wide ping by itself.
-
 const NO_PERMS_MESSAGE = stripIndents`
   :tw_warning: *You need to be a channel manager to ping.*
   _If this is incorrect, please DM <@U059VC0UDEU>._
@@ -706,7 +699,6 @@ const NO_PERMS_MESSAGE = stripIndents`
 
 const PING_PLACEHOLDER = "<!ping>";
 
-// Refetches the mentioning message and turns it into ping text + blocks.
 async function loadMentionPing(
   client: Slack.webApi.WebClient,
   channelId: string,
@@ -741,8 +733,6 @@ async function loadMentionPing(
   return { message, type, filePermalinks, richText };
 }
 
-// Sends the ping, then deletes the original as its author or asks them to
-// authorise that once.
 async function sendMentionPing(
   client: Slack.webApi.WebClient,
   userId: string,
@@ -782,7 +772,7 @@ async function sendMentionPing(
           type: "section",
           text: {
             type: "mrkdwn",
-            text: ":tw_white_check_mark: *Ping sent!* Authorise at-channel once and it will delete your original messages for you from now on (this one included). Until then, mentions will ask you to confirm before pinging.",
+            text: ":tw_white_check_mark: *Ping sent!* Authorise at-channel once and it will delete your original messages for you from now on (this one included).",
           },
         },
         {
@@ -843,12 +833,6 @@ app.event("app_mention", async ({ event, client }) => {
     if (!ping) return;
     if (!ping.message && ping.filePermalinks.length === 0) {
       await ephemeral(":tw_warning: Add some text or an image to your ping.");
-      return;
-    }
-
-    // Authorised users get the ping straight away; everyone else confirms.
-    if (await hasUserToken(userId)) {
-      await sendMentionPing(client, userId, channelId, ts, ping);
       return;
     }
 
@@ -935,7 +919,6 @@ app.action("cancel_mention_ping", async ({ ack, respond }) => {
   await respond({ delete_original: true });
 });
 
-// The "Authorise" button is a link button; Slack still sends an action we must ack.
 app.action("authorise_auto_delete", async ({ ack }) => {
   await ack();
 });
