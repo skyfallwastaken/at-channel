@@ -826,14 +826,6 @@ app.event("app_mention", async ({ event, client }) => {
       return;
     }
 
-    if (channelId === "C09BQEC01FZ") {
-      await client.chat.postMessage({
-        channel: channelId,
-        text: `<@${userId}> tried to ping. i'm tired boss. no pings for you.`,
-      });
-      return;
-    }
-
     if (!(await hasPerms(userId, channelId, client))) {
       await ephemeral(NO_PERMS_MESSAGE);
       logger.debug(`${rayId}: ${userId} mentioned the bot without perms`);
