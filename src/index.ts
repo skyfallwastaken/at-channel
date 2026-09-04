@@ -54,20 +54,36 @@ const botId = (
   })
 ).user_id;
 
+type SenderProfile = { displayName: string; avatar?: string };
+
+async function getSenderProfile(
+  client: Slack.webApi.WebClient,
+  userId: string,
+): Promise<SenderProfile> {
+  const user = await client.users.info({ user: userId });
+  return {
+    displayName:
+      user?.user?.profile?.display_name || user?.user?.name || "<unknown>",
+    avatar:
+      user?.user?.profile?.image_original || user?.user?.profile?.image_512,
+  };
+}
+
 async function sendPing(
   type: "channel" | "here",
   message: string,
   userId: string,
   channelId: string,
   client: Slack.webApi.WebClient,
-  richText?: Slack.types.RichTextBlock,
-  filePermalinks: string[] = [],
+  opts: {
+    richText?: Slack.types.RichTextBlock;
+    filePermalinks?: string[];
+    profile?: Promise<SenderProfile>;
+    onPosted?: (ts: string) => Promise<unknown>;
+  } = {},
 ) {
-  const user = await client.users.info({ user: userId });
-  const displayName =
-    user?.user?.profile?.display_name || user?.user?.name || "<unknown>";
-  const avatar =
-    user?.user?.profile?.image_original || user?.user?.profile?.image_512;
+  const { displayName, avatar } = await (opts.profile ??
+    getSenderProfile(client, userId));
 
   const ts = await postPing(client, channelId, type, message, {
     username: displayName,
@@ -76,8 +92,9 @@ async function sendPing(
       event_type: "at_channel_message",
       event_payload: { source_user_id: userId },
     },
-    richText,
-    filePermalinks,
+    richText: opts.richText,
+    filePermalinks: opts.filePermalinks,
+    onPosted: opts.onPosted,
   });
 
   await Promise.all([
@@ -139,16 +156,23 @@ async function pingCommand(
       return;
     }
 
-    const ts = await sendPing(
+    const profile = getSenderProfile(client, userId);
+    const sub = { result: "failed" as Awaited<ReturnType<typeof subscribeToThread>> };
+    await sendPing(
       pingType,
       await fixChannelRefs(message, client),
       userId,
       channelId,
       client,
+      {
+        profile,
+        onPosted: async (ts) => {
+          sub.result = await subscribeToThread(userId, channelId, ts);
+        },
+      },
     );
-    const subscribed = await subscribeToThread(userId, channelId, ts);
     const hint =
-      subscribed === "no_token"
+      sub.result === "no_token"
         ? ` <${authUrl(userId)}|authorise at-channel> to get notified of replies to your pings.`
         : "";
     await respond({
@@ -757,32 +781,32 @@ async function sendMentionPing(
   channelId: string,
   ts: string,
   ping: NonNullable<Awaited<ReturnType<typeof loadMentionPing>>>,
+  profile = getSenderProfile(client, userId),
 ) {
   const message = ping.message.replaceAll(PING_PLACEHOLDER, `@${ping.type}`);
   const richText = ping.richText
     ? richTextWithBroadcast(ping.richText, botId as string, ping.type)
     : undefined;
-  const pingTs = await sendPing(
-    ping.type,
-    message,
-    userId,
-    channelId,
-    client,
+  const del = { outcome: "failed" as Awaited<ReturnType<typeof deleteAsUser>> };
+  await sendPing(ping.type, message, userId, channelId, client, {
     richText,
-    ping.filePermalinks,
-  );
-
-  const [outcome] = await Promise.all([
-    deleteAsUser(userId, channelId, ts),
-    subscribeToThread(userId, channelId, pingTs),
-  ]);
-  if (outcome === "deleted") return;
+    filePermalinks: ping.filePermalinks,
+    profile,
+    // Both only need the ping's ts, so they overlap with the file wait
+    onPosted: async (pingTs) => {
+      [del.outcome] = await Promise.all([
+        deleteAsUser(userId, channelId, ts),
+        subscribeToThread(userId, channelId, pingTs),
+      ]);
+    },
+  });
+  if (del.outcome === "deleted") return;
 
   await client.reactions
     .add({ channel: channelId, timestamp: ts, name: "bell" })
     .catch(() => {});
 
-  if (outcome === "no_token") {
+  if (del.outcome === "no_token") {
     await rememberPending(userId, channelId, ts);
     await client.chat.postEphemeral({
       channel: channelId,
@@ -907,6 +931,7 @@ app.action(/^send_mention_ping_(channel|here)$/, async ({ ack, body, action, res
       await respond({ text: NO_PERMS_MESSAGE, replace_original: true });
       return;
     }
+    const profile = getSenderProfile(client, userId);
     const ping = await loadMentionPing(client, channelId, ts);
     if (!ping) {
       await respond({
@@ -916,7 +941,7 @@ app.action(/^send_mention_ping_(channel|here)$/, async ({ ack, body, action, res
       return;
     }
     await respond({ delete_original: true });
-    await sendMentionPing(client, userId, channelId, ts, { ...ping, type });
+    await sendMentionPing(client, userId, channelId, ts, { ...ping, type }, profile);
   } catch (e) {
     console.log(e);
     logger.error(`${rayId}: Failed to send confirmed mention ping: ${e}`);

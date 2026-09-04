@@ -11,6 +11,7 @@ import type Slack from "@slack/bolt";
 // with the attachment removed. Edits reuse the same final payload.
 
 type Block = Slack.types.AnyBlock;
+type RichText = Slack.types.RichTextBlock;
 
 // verbatim: Slack must not re-resolve plain "#name" text by itself; it picks
 // the wrong channel when names collide. Slash commands send real <#ID|name>
@@ -19,8 +20,6 @@ const section = (text: string): Slack.types.SectionBlock => ({
   type: "section",
   text: { type: "mrkdwn", text, verbatim: true },
 });
-
-type RichText = Slack.types.RichTextBlock;
 
 export function buildPingMessage(
   type: "channel" | "here",
@@ -101,14 +100,11 @@ export async function postPing(
     icon_url?: string;
     metadata?: Slack.webApi.ChatPostMessageArguments["metadata"];
     richText?: RichText;
-    // Slack file permalinks (from the user's original message). Slack turns
-    // permalinks in `text` into real file attachments on the message, of any
-    // type, a few seconds after posting. Updating before that happens cancels
-    // it, so we wait for the files to land before the clean-up update.
     filePermalinks?: string[];
+    onPosted?: (ts: string) => Promise<unknown>;
   } = {},
 ) {
-  const { richText, filePermalinks = [], ...rest } = extra;
+  const { richText, filePermalinks = [], onPosted, ...rest } = extra;
   const { initial, final } = buildPingMessage(type, message, richText);
   const posted = await client.chat.postMessage({
     channel,
@@ -119,33 +115,13 @@ export async function postPing(
     unfurl_media: true,
   });
   if (!posted.ts) throw new Error("Failed to send ping");
-  if (filePermalinks.length) {
-    await waitForFiles(client, channel, posted.ts, filePermalinks.length);
-  }
-  await client.chat.update({ channel, ts: posted.ts, ...final });
+  const side = onPosted?.(posted.ts);
+  await client.chat.update({
+    channel,
+    ts: posted.ts,
+    ...final,
+    text: [final.text, ...filePermalinks].join(" "),
+  });
+  await side;
   return posted.ts;
-}
-
-const FILE_WAIT_MS = 15_000;
-const FILE_POLL_MS = 500;
-
-async function waitForFiles(
-  client: Slack.webApi.WebClient,
-  channel: string,
-  ts: string,
-  count: number,
-) {
-  const deadline = Date.now() + FILE_WAIT_MS;
-  while (Date.now() < deadline) {
-    await Bun.sleep(FILE_POLL_MS);
-    const history = await client.conversations.history({
-      channel,
-      latest: ts,
-      oldest: ts,
-      inclusive: true,
-      limit: 1,
-    });
-    const files = history.messages?.[0]?.files?.length ?? 0;
-    if (files >= count) return;
-  }
 }
