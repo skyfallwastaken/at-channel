@@ -21,6 +21,7 @@ import {
 import { richTextBlockToMrkdwn } from "./richText";
 import buildEditPingModal from "./editPingModal";
 import { buildPingMessage, postPing, richTextWithBroadcast } from "./ping";
+import { fixChannelRefs, warmChannelCache } from "./channelRefs";
 import { db, adminsTable, pingsTable, pingPermsTable } from "./db";
 import { and, eq, sql } from "drizzle-orm";
 import { LogSnag } from "@logsnag/node";
@@ -118,6 +119,9 @@ async function pingCommand(
   const rayId = generateRandomString(12);
   const { channel_id: channelId, user_id: userId } = command;
   const { text: message } = payload;
+  logger.debug(
+    `${rayId}: /${pingType} from ${userId} in ${channelId}: ${JSON.stringify(message)}`,
+  );
 
   try {
     if (!(await hasPerms(userId, channelId, client))) {
@@ -135,7 +139,13 @@ async function pingCommand(
       return;
     }
 
-    const ts = await sendPing(pingType, message, userId, channelId, client);
+    const ts = await sendPing(
+      pingType,
+      await fixChannelRefs(message, client),
+      userId,
+      channelId,
+      client,
+    );
     const subscribed = await subscribeToThread(userId, channelId, ts);
     const hint =
       subscribed === "no_token"
@@ -943,5 +953,6 @@ app.command(AT_CHANNEL_LEADERBOARD_NAME, leaderboardCommand);
 
 await app.start();
 startOAuthServer();
+warmChannelCache(app.client);
 
 logger.info("Started @channel!");

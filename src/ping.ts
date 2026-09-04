@@ -12,9 +12,12 @@ import type Slack from "@slack/bolt";
 
 type Block = Slack.types.AnyBlock;
 
+// verbatim: Slack must not re-resolve plain "#name" text by itself; it picks
+// the wrong channel when names collide. Slash commands send real <#ID|name>
+// references (should_escape), which render fine verbatim.
 const section = (text: string): Slack.types.SectionBlock => ({
   type: "section",
-  text: { type: "mrkdwn", text },
+  text: { type: "mrkdwn", text, verbatim: true },
 });
 
 type RichText = Slack.types.RichTextBlock;

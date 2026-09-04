@@ -14,7 +14,7 @@ test("initial post carries the mention only inside an attachment", () => {
 test("final update has the token in a block, plain text, and clears the attachment", () => {
   const { final } = buildPingMessage("channel", "hello world");
   expect(final.text).toBe("@channel hello world");
-  expect(final.blocks).toEqual([{ type: "section", text: { type: "mrkdwn", text: "<!channel> hello world" } }]);
+  expect(final.blocks).toEqual([{ type: "section", text: { type: "mrkdwn", text: "<!channel> hello world", verbatim: true } }]);
   expect(final.attachments).toEqual([]);
 });
 
