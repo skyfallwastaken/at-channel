@@ -20,7 +20,13 @@ import {
 } from "./util";
 import { richTextBlockToMrkdwn } from "./richText";
 import buildEditPingModal from "./editPingModal";
-import { buildPingMessage, postPing, richTextWithBroadcast } from "./ping";
+import {
+  buildPingMessage,
+  notifyFileShared,
+  postPing,
+  richTextWithBroadcast,
+  type PingFile,
+} from "./ping";
 import { fixChannelRefs, warmChannelCache } from "./channelRefs";
 import { db, adminsTable, pingsTable, pingPermsTable } from "./db";
 import { and, eq, sql } from "drizzle-orm";
@@ -77,9 +83,10 @@ async function sendPing(
   client: Slack.webApi.WebClient,
   opts: {
     richText?: Slack.types.RichTextBlock;
-    filePermalinks?: string[];
+    files?: PingFile[];
     profile?: Promise<SenderProfile>;
     onPosted?: (ts: string) => Promise<unknown>;
+    onFilesAttached?: (ts: string, attached: boolean) => Promise<unknown>;
   } = {},
 ) {
   const { displayName, avatar } = await (opts.profile ??
@@ -93,8 +100,9 @@ async function sendPing(
       event_payload: { source_user_id: userId },
     },
     richText: opts.richText,
-    filePermalinks: opts.filePermalinks,
+    files: opts.files,
     onPosted: opts.onPosted,
+    onFilesAttached: opts.onFilesAttached,
   });
 
   await Promise.all([
@@ -769,10 +777,10 @@ async function loadMentionPing(
   const type: "channel" | "here" = /<!here>|@here/.test(message)
     ? "here"
     : "channel";
-  const filePermalinks = (original.files ?? [])
-    .map((f) => f.permalink)
-    .filter((p): p is string => Boolean(p));
-  return { message, type, filePermalinks, richText };
+  const files = (original.files ?? []).flatMap((f) =>
+    f.id && f.permalink ? [{ id: f.id, permalink: f.permalink }] : [],
+  );
+  return { message, type, files, richText };
 }
 
 async function sendMentionPing(
@@ -790,14 +798,12 @@ async function sendMentionPing(
   const del = { outcome: "failed" as Awaited<ReturnType<typeof deleteAsUser>> };
   await sendPing(ping.type, message, userId, channelId, client, {
     richText,
-    filePermalinks: ping.filePermalinks,
+    files: ping.files,
     profile,
-    // Both only need the ping's ts, so they overlap with the file wait
-    onPosted: async (pingTs) => {
-      [del.outcome] = await Promise.all([
-        deleteAsUser(userId, channelId, ts),
-        subscribeToThread(userId, channelId, pingTs),
-      ]);
+    onPosted: (pingTs) => subscribeToThread(userId, channelId, pingTs),
+    // The original must outlive the file attach, or its files die with it.
+    onFilesAttached: async (_pingTs, attached) => {
+      if (attached) del.outcome = await deleteAsUser(userId, channelId, ts);
     },
   });
   if (del.outcome === "deleted") return;
@@ -868,7 +874,7 @@ app.event("app_mention", async ({ event, client }) => {
 
     const ping = await loadMentionPing(client, channelId, ts);
     if (!ping) return;
-    if (!ping.message && ping.filePermalinks.length === 0) {
+    if (!ping.message && ping.files.length === 0) {
       await ephemeral(":tw_warning: Add some text or an image to your ping.");
       return;
     }
@@ -959,6 +965,12 @@ app.action("cancel_mention_ping", async ({ ack, respond }) => {
 
 app.action("authorise_auto_delete", async ({ ack }) => {
   await ack();
+});
+
+// Slack shares the original's files into the ping asynchronously; this is
+// how postPing learns they have landed (see waitForFiles).
+app.event("file_shared", async ({ event }) => {
+  notifyFileShared(event.channel_id, event.file_id);
 });
 
 // Drop stored user tokens Slack tells us are gone.

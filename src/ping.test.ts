@@ -45,3 +45,33 @@ test("richTextWithBroadcast prepends a broadcast when there is none", () => {
   expect(out.elements[0]).toEqual({ type: "rich_text_section", elements: [{ type: "broadcast", range: "channel" }, { type: "text", text: " " }] });
   expect(out.elements[1].elements[0].text).toBe("plain");
 });
+
+test("postPing waits for file_shared events, then runs onFilesAttached", async () => {
+  const { postPing, notifyFileShared } = require("./ping");
+  const calls: string[] = [];
+  const client = {
+    chat: {
+      postMessage: async () => { calls.push("post"); return { ts: "1.0" }; },
+      update: async () => { calls.push("update"); return {}; },
+    },
+    conversations: { history: async () => { calls.push("history"); return { messages: [] }; } },
+  };
+  const files = [{ id: "F1", permalink: "https://x/F1" }, { id: "F2", permalink: "https://x/F2" }];
+  let attached: boolean | undefined;
+  const t0 = performance.now();
+  const run = postPing(client, "C1", "channel", "hi", {
+    files,
+    onPosted: async () => { calls.push("posted"); },
+    onFilesAttached: async (_ts: string, ok: boolean) => { attached = ok; calls.push("files"); },
+  });
+  await Bun.sleep(20);
+  notifyFileShared("C1", "F1");
+  notifyFileShared("C_OTHER", "F2"); // wrong channel, ignored
+  await Bun.sleep(20);
+  expect(attached).toBeUndefined();
+  notifyFileShared("C1", "F2");
+  expect(await run).toBe("1.0");
+  expect(attached).toBe(true);
+  expect(calls).not.toContain("history");
+  expect(performance.now() - t0).toBeLessThan(1000);
+});

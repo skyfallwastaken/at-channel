@@ -98,7 +98,8 @@
         "event_subscriptions": {
             "bot_events": [
                 "app_mention",
-                "tokens_revoked"
+                "tokens_revoked",
+                "file_shared"
             ]
         }
     }

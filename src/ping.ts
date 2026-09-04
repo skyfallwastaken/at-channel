@@ -100,11 +100,18 @@ export async function postPing(
     icon_url?: string;
     metadata?: Slack.webApi.ChatPostMessageArguments["metadata"];
     richText?: RichText;
-    filePermalinks?: string[];
+    // Files from the user's original message. Their permalinks go in `text`;
+    // Slack then attaches the files to the ping, of any type, asynchronously.
+    files?: PingFile[];
+    // Runs as soon as the ping exists, in parallel with the clean-up update.
     onPosted?: (ts: string) => Promise<unknown>;
+    // Runs once the files have attached to the ping (immediately when there
+    // are none). Deleting the original before then deletes its files too.
+    onFilesAttached?: (ts: string, attached: boolean) => Promise<unknown>;
   } = {},
 ) {
-  const { richText, filePermalinks = [], onPosted, ...rest } = extra;
+  const { richText, files = [], onPosted, onFilesAttached, ...rest } = extra;
+  const filePermalinks = files.map((f) => f.permalink);
   const { initial, final } = buildPingMessage(type, message, richText);
   const posted = await client.chat.postMessage({
     channel,
@@ -115,13 +122,72 @@ export async function postPing(
     unfurl_media: true,
   });
   if (!posted.ts) throw new Error("Failed to send ping");
-  const side = onPosted?.(posted.ts);
+  const ts = posted.ts;
+  const side = Promise.all([
+    onPosted?.(ts),
+    (async () => {
+      const attached = files.length
+        ? await waitForFiles(client, channel, ts, files)
+        : true;
+      await onFilesAttached?.(ts, attached);
+    })(),
+  ]);
   await client.chat.update({
     channel,
-    ts: posted.ts,
+    ts,
     ...final,
     text: [final.text, ...filePermalinks].join(" "),
   });
   await side;
-  return posted.ts;
+  return ts;
+}
+
+export type PingFile = { id: string; permalink: string };
+
+const FILE_WAIT_MS = 15_000;
+
+type Waiter = { remaining: Set<string>; resolve: () => void };
+const waiters = new Map<string, Set<Waiter>>(); // channel -> waiters
+
+export function notifyFileShared(channel: string, fileId: string) {
+  for (const w of waiters.get(channel) ?? []) {
+    if (w.remaining.delete(fileId) && w.remaining.size === 0) w.resolve();
+  }
+}
+
+async function waitForFiles(
+  client: Slack.webApi.WebClient,
+  channel: string,
+  ts: string,
+  files: PingFile[],
+) {
+  const set = waiters.get(channel) ?? new Set<Waiter>();
+  waiters.set(channel, set);
+  let done = false;
+  await new Promise<void>((resolve) => {
+    const waiter: Waiter = {
+      remaining: new Set(files.map((f) => f.id)),
+      resolve: () => {
+        done = true;
+        set.delete(waiter);
+        resolve();
+      },
+    };
+    set.add(waiter);
+    setTimeout(() => {
+      set.delete(waiter);
+      resolve();
+    }, FILE_WAIT_MS);
+  });
+  if (set.size === 0) waiters.delete(channel);
+  if (done) return true;
+  // No event in time; check once in case it was missed.
+  const history = await client.conversations.history({
+    channel,
+    latest: ts,
+    oldest: ts,
+    inclusive: true,
+    limit: 1,
+  });
+  return (history.messages?.[0]?.files?.length ?? 0) >= files.length;
 }
